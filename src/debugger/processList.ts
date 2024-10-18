@@ -17,7 +17,7 @@ export async function pickProcess(): Promise<string | undefined> {
 }
 
 export async function chooseProcess(): Promise<ProcessItem | undefined> {
-    const items = getAttachItems();
+    const items = await getAttachItems();
 
     const chosenProcess: vscode.QuickPickOptions = {
         matchOnDescription: true,
@@ -34,46 +34,86 @@ export async function chooseProcess(): Promise<ProcessItem | undefined> {
 }
 
 export async function getAttachItems(): Promise<ProcessItem[]> {
-    // these are the indices of the pid information and command name which we need to populate the process picker
-    // sample ps -af -o uname,pid,time, cmd output
-    // USER         PID     TIME CMD
-    // uname1     13710 00:00:00 bash
-    // uname1     18042 00:00:00  \_ ps -af -o uname,pid,time,cmd
-    // uname1     13361 00:00:00 bash
-    // uname1     13390 00:00:09  \_ /usr/bin/p4v.bin
-    // root        1710 00:00:50 /usr/lib/xorg/Xorg -core :0 -seat seat0 -auth /var/run
-    // root        1713 00:00:00 /sbin/agetty -o -p -- \u --noclear tty1 linux
+    const usernameCharacters = 20;
+    const commandCharacters = 50;
+    /**
+     * We use the command 'ps -ax -o pid,uname:${usernameCharacters},comm:${commandCharacters},args' to
+     * list the all processes with necessary information for the debugger to pick from and attach to.
+     * 
+     * Sample output:
+     *    PID USER                 COMMAND                                            COMMAND
+     *      1 root                 systemd                                            /sbin/init
+     *      2 root                 init-systemd(Ub                                    /init
+     *     10 root                 init                                               plan9 --control-socket 6 --log-level 4 --server-fd 7 --pipe-fd 9 --log-truncate
+     *     51 root                 systemd-journal                                    /lib/systemd/systemd-journald
+     *     82 root                 systemd-udevd                                      /lib/systemd/systemd-udevd
+     *    110 root                 snapfuse                                           snapfuse /var/lib/snapd/snaps/bare_5.snap /snap/bare/5 -o ro,nodev,allow_other,suid
+     */
 
-    const { error, stdout, stderr } = await exec('ps -af -o uname,pid,time,cmd');
+    const { error, stdout, stderr } = await exec(`ps -ax -o pid,uname:${usernameCharacters},comm:${commandCharacters},args`);
     const options = stdout;
 
     if (error || stderr) {
-        throw new Error('Unable to select process to attach to');
+        if (stderr && stderr.includes('screen size is bogus')) {
+            // ignore this error silently;
+            // see https://github.com/microsoft/vscode/issues/75932
+        } else {
+            throw new Error(`Unable to select process to attach to: ${stderr}`);
+        }
     }
 
     const output = options.split('\n');
-
-    // figure out the index where PID ends because all PIDs would end at that index
-    const pidEndIdx = output[0].indexOf('PID') + 3;
-
-    // based on the the format ps returns info, the pids would start after the first set of spaces we encounter
-    const pidArray = output.map((x: string) => Number.parseInt(x.slice(x.indexOf(' '), pidEndIdx).trimStart())).slice(1);
-
-    const cmdArray = output
-        .map((x: string) => {
-            // figuring out the index of the executable based on the last index of ':'
-            const fullPathCmdSlice = x.slice(x.lastIndexOf(':') + 3, x.length).trimStart();
-            const execCmdSlice = fullPathCmdSlice.slice(fullPathCmdSlice.lastIndexOf('/') + 1, fullPathCmdSlice.length);
-            return execCmdSlice;
-        })
-        .slice(1);
-
-    const username = output.map((x: string) => x.slice(0, x.indexOf(' ')).trimStart()).slice(1);
-
-    const items: ProcessItem[] = pidArray.map((item: number, index: string) => ({ pid: pidArray[index], label: `${username[index]} : ${cmdArray[index]}` }));
-    items.sort((a, b) => 0 - (a.label > b.label ? -1 : 1));
-
-    const quickPickList: ProcessItem[] = items.filter((item: ProcessItem) => item.label.trim() !== ':');
+    
+    /**
+     * The following lines of code till the end of this function reference the code handling 
+     * the process picking functionality in the Debugger section of the vscode-cpptools extension:
+     * https://github.com/microsoft/vscode-cpptools/blob/main/Extension/src/Debugger/nativeAttach.ts
+     */
+    const quickPickList: ProcessItem[] = [];
+    
+    // lines[0] is the header of the output table
+    for (let i = 1; i < output.length; i += 1) {
+        const line: string = output[i];
+        if (line) {
+            const processEntry: ProcessItem | undefined = parseLineFromPs(line, usernameCharacters, commandCharacters);
+            if (processEntry) {
+                quickPickList.push(processEntry);
+            }
+        }
+    }
 
     return quickPickList;
+}
+
+/**
+ * This function are a copy of the code handling the process picking 
+ * functionality in the Debugger section of the vscode-cpptools extension:
+ * https://github.com/microsoft/vscode-cpptools/blob/main/Extension/src/Debugger/nativeAttach.ts
+ */
+export function parseLineFromPs(line: string, usernameCharacters: number, commandCharacters: number): ProcessItem | undefined {
+    // Explanation of the regex:
+    //   - any leading whitespace
+    //   - PID
+    //   - whitespace
+    //   - executable name --> this is commandCharacters - 1 because ps reserves one character
+    //     for the whitespace separator
+    //   - whitespace
+    //   - args (might be empty)
+    const noValidProcess = undefined;
+    const psEntry = new RegExp(`^\\s*([0-9]+)\\s+(.{${usernameCharacters - 1}})\\s+(.{${commandCharacters - 1}})\\s+(.*)$`);
+    const matches: RegExpExecArray | null = psEntry.exec(line);
+    if (matches && matches.length === 5) {
+        const pid: string = matches[1].trim();
+        const username: string = matches[2].trim();
+        const executable: string = matches[3].trim();
+        const cmdline: string = matches[4].trim();
+        const processItem: ProcessItem = { 
+            pid: Number(pid), 
+            label: `${username}:${executable}`, 
+            description: `${pid}`,
+            detail: cmdline 
+        };
+        return processItem;
+    }
+    return noValidProcess;
 }
