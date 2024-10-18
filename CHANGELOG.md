@@ -12,6 +12,25 @@
 * **CUDA Debugger**
     * See cuda-gdb release notes in the NVIDIA CUDA Toolkit 12.5 Update 1.
 
+## Revision 2023.2.DavidLeeberman
+
+* Fix the "screen size is bogus" error when debugging.
+
+Refer to bug report [PR #75932] (https://github.com/microsoft/vscode/issues/75932):
+
+On some linux systems, the "/bin/ps" command tries to verify that the screen size is big enough to print something useful. If the size is too small, the message "your 131072x1 screen size is bogus, expect trouble" gets send to stderr.
+
+Since the VS Code "process picker" is using "/bin/ps" to find all node.js processes it suffer from this useless error message: if an error is detected on stderr, the picker shows the error and assumes that the "ps" has failed.
+
+The workaround is to detect and ignore this special "error" produced by "ps".
+
+Borrow the fix for vscode-cpptools https://github.com/microsoft/vscode-cpptools/blob/main/Extension/CHANGELOG.md
+[PR #5669](https://github.com/microsoft/vscode-cpptools/pull/5669)
+
+* Resolve from the main project's node_modules first when linking to the local repository of a module.
+
+* Enable source map for debugging by generating a target file for each source file separately.
+
 ## Version 2023.2
 
 * **Key Features**
