@@ -127,13 +127,23 @@
                                 "description": "The path to cuda-gdb. If unspecified, the path will be searched for cuda-gdb.",
                                 "default": "/usr/local/cuda/bin/cuda-gdb"
                             },
+                            "miDebuggerPath": {
+                                "type": "string",
+                                "description": "The path to cuda-gdb. If unspecified, the path will be searched for cuda-gdb.",
+                                "default": "/usr/local/cuda/bin/cuda-gdb"
+                            },
                             "program": {
                                 "type": "string",
                                 "description": "Path to the program to debug.",
                                 "default": "${workspaceFolder}/a.out"
                             },
                             "args": {
-                                "type": "string",
+                                "type": ["string", "array"], 
+                                "description": "Command-line arguments to pass to the debuggee.",
+                                "default": ""
+                            },
+                            "miDebuggerArgs": {
+                                "type": ["string", "array"],
                                 "description": "Command-line arguments to pass to the debuggee.",
                                 "default": ""
                             },
@@ -210,6 +220,11 @@
                                 "type": "string",
                                 "description": "Directory where the debugger searches for shared libraries.",
                                 "default": ""
+                            },
+                            "testMode": {
+                                "type": "boolean",
+                                "description": "Runs Nsight Visual Studio Code edition in test mode.",
+                                "default": false
                             }
                         }
                     },
@@ -218,6 +233,11 @@
                         "required": [],
                         "properties": {
                             "debuggerPath": {
+                                "type": "string",
+                                "description": "The path to cuda-gdb. If unspecified, the path will be searched for cuda-gdb.",
+                                "default": "/usr/local/cuda/bin/cuda-gdb"
+                            },
+                            "miDebuggerPath": {
                                 "type": "string",
                                 "description": "The path to cuda-gdb. If unspecified, the path will be searched for cuda-gdb.",
                                 "default": "/usr/local/cuda/bin/cuda-gdb"
@@ -246,7 +266,12 @@
                                 ]
                             },
                             "args": {
-                                "type": "string",
+                                "type": ["string", "array"],
+                                "description": "Command-line arguments to pass to the debuggee.",
+                                "default": ""
+                            },
+                            "miDebuggerArgs": {
+                                "type": ["string", "array"],
                                 "description": "Command-line arguments to pass to the debuggee.",
                                 "default": ""
                             },
@@ -374,13 +399,23 @@
                                 "description": "The path to cuda-gdb. If unspecified, the path will be searched for cuda-gdb.",
                                 "default": "/usr/local/cuda/bin/cuda-gdb"
                             },
+                            "miDebuggerPath": {
+                                "type": "string",
+                                "description": "The path to cuda-gdb. If unspecified, the path will be searched for cuda-gdb.",
+                                "default": "/usr/local/cuda/bin/cuda-gdb"
+                            },
                             "program": {
                                 "type": "string",
                                 "description": "Path to the program to debug.",
                                 "default": "${workspaceFolder}/a.out"
                             },
                             "args": {
-                                "type": "string",
+                                "type": ["string", "array"],
+                                "description": "Command-line arguments to pass to the debuggee.",
+                                "default": ""
+                            },
+                            "miDebuggerArgs": {
+                                "type": ["string", "array"],
                                 "description": "Command-line arguments to pass to the debuggee.",
                                 "default": ""
                             },
@@ -503,6 +538,11 @@
                                 "type": "string",
                                 "description": "Directory where the debugger searches for shared libraries.",
                                 "default": ""
+                            },
+                            "testMode": {
+                                "type": "boolean",
+                                "description": "Runs Nsight Visual Studio Code edition in test mode.",
+                                "default": false
                             }
                         }
                     }
@@ -564,13 +604,23 @@
                                 "description": "The path to cuda-gdb. If unspecified, the path will be searched for cuda-gdb.",
                                 "default": "/usr/local/cuda/bin/cuda-gdb"
                             },
+                            "miDebuggerPath": {
+                                "type": "string",
+                                "description": "The path to cuda-gdb. If unspecified, the path will be searched for cuda-gdb.",
+                                "default": "/usr/local/cuda/bin/cuda-gdb"
+                            },
                             "program": {
                                 "type": "string",
                                 "description": "Path to the program to debug.",
                                 "default": "${workspaceFolder}/a.out"
                             },
                             "args": {
-                                "type": "string",
+                                "type": ["string", "array"],
+                                "description": "Command-line arguments to pass to the debuggee.",
+                                "default": ""
+                            },
+                            "miDebuggerArgs": {
+                                "type": ["string", "array"],
                                 "description": "Command-line arguments to pass to the debuggee.",
                                 "default": ""
                             },
@@ -698,6 +748,11 @@
                                 "type": "string",
                                 "description": "Path to upload the file to on the QNX system",
                                 "default": ""
+                            },
+                            "testMode": {
+                                "type": "boolean",
+                                "description": "Runs Nsight Visual Studio Code edition in test mode.",
+                                "default": false
                             }
                         }
                     }
@@ -722,7 +777,7 @@
                         "label": "CUDA QNX GDB Server: Launch",
                         "description": "Launch a CUDA program in debug mode",
                         "body": {
-                            "name": "CUDA GDB Server: Launch",
+                            "name": "CUDA QNX GDB Server: Launch",
                             "type": "cuda-qnx-gdbserver",
                             "request": "launch",
                             "server": "cuda-gdbserver",
@@ -749,7 +804,7 @@
         "clean:tests": "gulp clean:tests",
         "watch": "webpack -c webpack.dev.js --watch --no-color",
         "webpack:prod": "webpack -c webpack.prod.js",
-        "package": "npm run prepare && gulp package",
+        "package": "npm run lint && npm run prepare && gulp package",
         "tsc": "npm run prepare && tsc -p ./",
         "pretest:no-webpack": "npm run tsc && npm run lint && gulp compile:test-programs",
         "test:no-webpack": "mocha --timeout 10000 out/test/*.test.js",
@@ -809,6 +864,7 @@
     "dependencies": {
         "@vscode/debugadapter": "^1.59.0",
         "@vscode/debugprotocol": "^1.59.0",
+        "axios": "^1.4.0",
         "cdt-gdb-adapter": "^0.0.19",
         "fs-extra": "^10.0.1",
         "universal-analytics": "^0.5.3",
