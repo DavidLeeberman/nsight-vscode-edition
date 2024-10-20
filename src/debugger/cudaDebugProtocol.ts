@@ -17,12 +17,12 @@ import * as types from './types';
 export namespace CudaDebugProtocol {
     export abstract class Request {
         static readonly changeCudaFocus: string = 'changeCudaFocus';
+
+        static readonly systemInfo: string = 'systemInfo';
     }
 
     export abstract class Event {
         static readonly changedCudaFocus: string = 'changedCudaFocus';
-
-        static readonly systemInfo: string = 'systemInfo';
     }
 
     export interface ChangeCudaFocusRequest extends DebugProtocol.Request {
@@ -47,8 +47,16 @@ export namespace CudaDebugProtocol {
         };
     }
 
-    export interface SystemInfoEvent extends DebugProtocol.Event {
-        // event: 'systemInfo' (Request.systemInfo)
+    export interface SystemInfoRequest extends DebugProtocol.Request {
+        // command: 'systemInfo' (Request.systemInfo)
+
+        arguments?: SystemInfoArguments;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-empty-interface
+    export interface SystemInfoArguments {}
+
+    export interface SystemInfoResponse extends DebugProtocol.Response {
         body: {
             systemInfo?: types.SystemInfo;
         };

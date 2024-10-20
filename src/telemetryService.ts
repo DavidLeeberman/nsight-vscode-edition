@@ -10,214 +10,71 @@
 \* ---------------------------------------------------------------------------------- */
 
 // eslint-disable-next-line max-classes-per-file
-import axios from 'axios';
+import * as ua from 'universal-analytics';
 import * as uuid from 'uuid';
 import * as vscode from 'vscode';
+import { logger } from '@vscode/debugadapter';
 
 import * as types from './debugger/types';
 
-export type TelemetryLocation = 'host' | 'debug-adapter';
+abstract class CustomDimension {
+    static readonly platform: string = 'cd1';
 
-type ActivityStartEvent = {
-    name: 'activity_start';
-    params: {
-        name: string;
-    };
-};
+    static readonly architecture: string = 'cd2';
 
-type ActivityEndEvent = {
-    name: 'activity_end';
-    params: {
-        name: string;
-    };
-};
+    static readonly distribution: string = 'cd3';
 
-type AdapterExitEvent = {
-    name: 'adapter_exit';
-    params: {
-        code?: number;
-        signal?: string;
-    };
-};
+    static readonly distributionVersion: string = 'cd4';
 
-type ErrorEvent = {
-    name: 'error';
-    params: {
-        name: string;
-        message: string;
-    };
-};
+    static readonly location: string = 'cd5';
 
-type ExecCommandEvent = {
-    name: 'exec_command';
-    params: {
-        name: string;
-        status: string;
-        reason?: string;
-    };
-};
+    static readonly gpuName: string = 'cd6';
 
-type GpuInfoEvent = {
-    name: 'gpu_info';
-    params: {
-        location: TelemetryLocation;
-        name?: string;
-        description?: string;
-        sm_type?: string;
-        name_by_os?: string;
-    };
-};
+    static readonly gpuDescription: string = 'cd7';
 
-type OsInfoEvent = {
-    name: 'os_info';
-    params: {
-        location: TelemetryLocation;
-        platform?: string;
-        architecture?: string;
-        distribution?: string;
-        distribution_version?: string;
-    };
-};
-
-type CustomEvent = ActivityStartEvent | ActivityEndEvent | AdapterExitEvent | ErrorEvent | ExecCommandEvent | GpuInfoEvent | OsInfoEvent;
-
-type Event = CustomEvent & {
-    params: {
-        session_id?: number;
-        engagement_time_msec?: number;
-        debug_mode?: boolean;
-        traffic_type?: string;
-    };
-};
-
-type UserProperties = {
-    [key: string]: {
-        value: string | number;
-    };
-};
-
-type Payload = {
-    client_id: string;
-    events: Event[];
-    user_properties: UserProperties;
-};
-
-class TelemetryClient {
-    private readonly clientID: string;
-
-    private readonly endpoint: string;
-
-    private readonly userProperties: UserProperties = {};
-
-    private sessionStartMs: number | undefined = undefined;
-
-    private lastEngagementMs: number | undefined = undefined;
-
-    GA4_ENDPOINT = 'https://www.google-analytics.com/mp/collect';
-
-    NV_DEVTOOLS_UXT_DEBUG = 'NV_DEVTOOLS_UXT_DEBUG';
-
-    NV_DEVTOOLS_UXT_ROLE = 'NV_DEVTOOLS_UXT_ROLE';
-
-    NV_DEVTOOLS_QA_ROLE = 'internal-qa';
-
-    isEnabled = false;
-
-    isDebugMode = false;
-
-    isInternal = false;
-
-    constructor(clientID: string, apiSecret: string, measurementID: string) {
-        this.clientID = clientID;
-        this.endpoint = `${this.GA4_ENDPOINT}?api_secret=${apiSecret}&measurement_id=${measurementID}`;
-
-        if (process.env[this.NV_DEVTOOLS_UXT_DEBUG]) {
-            this.isDebugMode = true;
-        }
-
-        if (process.env[this.NV_DEVTOOLS_UXT_ROLE] === this.NV_DEVTOOLS_QA_ROLE) {
-            this.isInternal = true;
-        }
-    }
-
-    addUserProperty(name: string, value: string | number): void {
-        this.userProperties[name] = {
-            value
-        };
-    }
-
-    sendEvent<T extends Event>(event: T): void {
-        this.sendEvents([event]);
-    }
-
-    sendEvents(events: Event[]): void {
-        if (!this.isEnabled) {
-            return;
-        }
-
-        if (!this.sessionStartMs) {
-            this.sessionStartMs = Date.now();
-        }
-
-        const engagementTimeMs: number = (() => {
-            if (!this.lastEngagementMs) {
-                this.lastEngagementMs = this.sessionStartMs;
-                return 0;
-            }
-
-            const currentTimeMs = Date.now();
-            const elapsedTimeMs = currentTimeMs - this.lastEngagementMs;
-            this.lastEngagementMs = currentTimeMs;
-
-            return elapsedTimeMs;
-        })();
-
-        // eslint-disable-next-line no-restricted-syntax
-        for (const event of events) {
-            event.params.session_id = this.sessionStartMs;
-            event.params.engagement_time_msec = engagementTimeMs;
-
-            if (this.isDebugMode) {
-                event.params.debug_mode = true;
-            }
-
-            if (this.isInternal) {
-                event.params.traffic_type = 'internal';
-            }
-        }
-
-        const payload: Payload = {
-            client_id: this.clientID,
-            events,
-            user_properties: this.userProperties
-        };
-
-        axios.post(this.endpoint, payload);
-    }
+    static readonly gpuSmType: string = 'cd8';
 }
 
+type TelemetryParams = { [dim: string]: string | undefined };
+
+type TelemetrySessionControl = 'start' | 'end';
+
+export type TelemetryLocation = 'host' | 'debug-adapter';
+
 export class TelemetryService {
-    private readonly client: TelemetryClient;
+    private visitor: ua.Visitor;
+
+    private isTelemetryEnabled = false;
 
     private static readonly CLIENT_ID_KEY = 'nsight.telemetryClientId';
 
     private static readonly TELEMETRY_CONFIG_ID = 'telemetry';
 
-    private static readonly TELEMETRY_CONFIG_LEVEL = 'telemetryLevel';
+    private static readonly TELEMETRY_CONFIG_ENABLED_ID = 'enableTelemetry';
 
-    constructor(context: vscode.ExtensionContext, apiSecret: string, measurementID: string, extensionVersion: string) {
-        let clientID: string | undefined = context.globalState.get<string>(TelemetryService.CLIENT_ID_KEY);
-        if (!clientID) {
-            clientID = uuid.v4();
-            context.globalState.update(TelemetryService.CLIENT_ID_KEY, clientID);
+    constructor(context: vscode.ExtensionContext, trackingId: string, extensionName: string, extensionVersion: string) {
+        let clientId: string | undefined = context.globalState.get<string>(TelemetryService.CLIENT_ID_KEY);
+        if (!clientId) {
+            clientId = uuid.v4();
+            context.globalState.update(TelemetryService.CLIENT_ID_KEY, clientId);
         }
 
-        this.client = new TelemetryClient(clientID, apiSecret, measurementID);
-
         const version: string = parseMajorMinorVersion(extensionVersion);
-        this.client.addUserProperty('app_version', version);
+
+        // Create a visitor and set persistent parameters that will be
+        // included in every tracking call. For more info on parameters see:
+        //
+        // https://developers.google.com/analytics/devguides/collection/protocol/v1/parameters
+
+        this.visitor = ua(trackingId, clientId);
+        this.visitor.set('aip', '1');
+        this.visitor.set('an', extensionName);
+        this.visitor.set('av', version);
+        this.visitor.set('ds', 'app');
+        this.visitor.set('ul', vscode.env.language);
 
         this.updateTelemetryEnabled();
+
         context.subscriptions.push(
             vscode.workspace.onDidChangeConfiguration(() => {
                 this.updateTelemetryEnabled();
@@ -226,78 +83,74 @@ export class TelemetryService {
     }
 
     get isEnabled(): boolean {
-        return this.client.isEnabled;
+        return this.isTelemetryEnabled;
     }
 
-    set isEnabled(value: boolean) {
-        this.client.isEnabled = value;
+    startSession(label: string): void {
+        this.sendSessionEvent('start', label);
     }
 
-    startSession(name: string): void {
-        this.client.sendEvent<ActivityStartEvent>({
-            name: 'activity_start',
+    endSession(label: string): void {
+        this.sendSessionEvent('end', label);
+    }
+
+    private sendSessionEvent(sessionControl: TelemetrySessionControl, label: string): void {
+        this.sendEvent({
+            category: 'session',
+            action: 'control',
+            label,
+            value: sessionControl,
             params: {
-                name
+                sc: sessionControl
             }
         });
     }
 
-    endSession(name: string): void {
-        this.client.sendEvent<ActivityEndEvent>({
-            name: 'activity_end',
-            params: {
-                name
-            }
-        });
-    }
-
-    trackError(name: string, message: string): void {
-        this.client.sendEvent<ErrorEvent>({
-            name: 'error',
-            params: {
-                name,
-                message
-            }
+    trackError(errorName: string, errorMessage: string): void {
+        this.sendEvent({
+            category: 'session',
+            action: 'error',
+            label: errorName,
+            value: errorMessage
         });
     }
 
     trackExit(code: number | undefined, signal: string | undefined): void {
-        this.client.sendEvent<AdapterExitEvent>({
-            name: 'adapter_exit',
-            params: {
-                code,
-                signal
-            }
+        const codeValue: string | undefined = code ? code.toString() : undefined;
+        this.sendEvent({
+            category: 'session',
+            action: 'exit',
+            label: signal,
+            value: codeValue
         });
     }
 
-    trackCommand(name: string): CommandTracker {
+    trackCommand(commandName: string): CommandTracker {
         // eslint-disable-next-line @typescript-eslint/no-this-alias, no-underscore-dangle
         const _this = this;
 
         type CommandTrackerStatus = 'initiated' | 'canceled' | 'completed';
 
-        let status: CommandTrackerStatus = 'initiated';
-        let reason: string | undefined;
+        let trackerStatus: CommandTrackerStatus = 'initiated';
+        let trackerReason = '';
 
         const tracker: CommandTracker = {
-            cancel(cancelReason: string): void {
-                status = 'canceled';
-                reason = cancelReason;
+            cancel(reason: string): void {
+                trackerStatus = 'canceled';
+                trackerReason = reason;
             },
 
             complete(): void {
-                status = 'completed';
+                trackerStatus = 'completed';
+                trackerReason = '';
             },
 
             dispose(): void {
-                _this.client.sendEvent<ExecCommandEvent>({
-                    name: 'exec_command',
-                    params: {
-                        name,
-                        status,
-                        reason
-                    }
+                _this.sendEvent({
+                    category: 'command',
+                    action: commandName,
+                    label: trackerStatus,
+                    value: trackerReason
                 });
             }
         };
@@ -305,44 +158,84 @@ export class TelemetryService {
         return tracker;
     }
 
-    trackSystemInfo(location: TelemetryLocation, systemInfo?: types.SystemInfo): void {
-        const events: Event[] = [];
+    trackSystemInfo(location: TelemetryLocation, label: string, systemInfo?: types.SystemInfo): void {
+        const locationParams = TelemetryService.getLocationParams(location);
+        const osParams = TelemetryService.getOsParams(systemInfo?.os);
 
-        if (systemInfo?.os) {
-            events.push({
-                name: 'os_info',
-                params: {
-                    location,
-                    platform: systemInfo?.os?.platform,
-                    architecture: systemInfo?.os?.architecture,
-                    distribution: systemInfo?.os?.distribution,
-                    distribution_version: systemInfo?.os?.distributionVersion
-                }
-            } as OsInfoEvent);
-        }
+        const category = 'info';
+        const action = 'system';
 
-        if (systemInfo?.gpus?.length) {
+        if (!systemInfo?.gpus || systemInfo?.gpus?.length === 0) {
+            const params = { ...locationParams, ...osParams };
+            this.sendEvent({
+                category,
+                action,
+                label,
+                params
+            });
+        } else {
             // eslint-disable-next-line no-restricted-syntax
-            for (const gpu of systemInfo.gpus) {
-                events.push({
-                    name: 'gpu_info',
-                    params: {
-                        location,
-                        name: gpu.name,
-                        description: gpu.description,
-                        sm_type: gpu.smType,
-                        name_by_os: `${gpu.name}: ${systemInfo?.os?.platform}`
-                    }
-                } as GpuInfoEvent);
+            for (const gpuInfo of systemInfo?.gpus) {
+                const gpuParams = TelemetryService.getGpuParams(gpuInfo);
+                const params = { ...locationParams, ...osParams, ...gpuParams };
+
+                this.sendEvent({
+                    category,
+                    action,
+                    label,
+                    params
+                });
             }
         }
+    }
 
-        this.client.sendEvents(events);
+    // prettier-ignore
+    private sendEvent({
+        category = '',
+        action = '',
+        label = '',
+        value = '',
+        params = {}
+    } = {}): void {
+
+        if (!this.isTelemetryEnabled) {
+            return;
+        }
+
+        if (!category || !action) {
+            logger.verbose('Telemetry events must include at least a category and an action.');
+            return;
+        }
+
+        this.visitor.event(category, action, label, value, params).send();
+    }
+
+    private static getLocationParams(location: TelemetryLocation): TelemetryParams {
+        return {
+            [CustomDimension.location]: location
+        };
+    }
+
+    private static getOsParams(osInfo?: types.OsInfo): TelemetryParams {
+        return {
+            [CustomDimension.platform]: osInfo?.platform,
+            [CustomDimension.architecture]: osInfo?.architecture,
+            [CustomDimension.distribution]: osInfo?.distribution,
+            [CustomDimension.distributionVersion]: osInfo?.distributionVersion
+        };
+    }
+
+    private static getGpuParams(gpuInfo?: types.GpuInfo): TelemetryParams {
+        return {
+            [CustomDimension.gpuName]: gpuInfo?.name,
+            [CustomDimension.gpuDescription]: gpuInfo?.description,
+            [CustomDimension.gpuSmType]: gpuInfo?.smType
+        };
     }
 
     private updateTelemetryEnabled(): void {
         const telemetryConfig: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration(TelemetryService.TELEMETRY_CONFIG_ID);
-        this.isEnabled = !(telemetryConfig[TelemetryService.TELEMETRY_CONFIG_LEVEL] === 'off');
+        this.isTelemetryEnabled = telemetryConfig.get<boolean>(TelemetryService.TELEMETRY_CONFIG_ENABLED_ID, false);
     }
 }
 

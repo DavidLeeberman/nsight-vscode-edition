@@ -115,9 +115,23 @@ class CudaDebugAdapterTracker implements vscode.DebugAdapterTracker {
                     break;
                 }
 
-                case CudaDebugProtocol.Event.systemInfo: {
-                    const typedEvent = eventMessage as CudaDebugProtocol.SystemInfoEvent;
-                    this.debugController.telemetry.trackSystemInfo('debug-adapter', typedEvent?.body?.systemInfo);
+                default:
+                    break;
+            }
+        } else if (protocolMessage.type === 'response') {
+            const responseMessage = message as DebugProtocol.Response;
+            const messageName: string = responseMessage.command;
+
+            switch (messageName) {
+                case 'configurationDone':
+                    if (this.debugController.telemetry.isEnabled) {
+                        vscode.debug.activeDebugSession?.customRequest(CudaDebugProtocol.Request.systemInfo, {});
+                    }
+                    break;
+
+                case CudaDebugProtocol.Request.systemInfo: {
+                    const typedResponse = responseMessage as CudaDebugProtocol.SystemInfoResponse;
+                    this.debugController.telemetry.trackSystemInfo('debug-adapter', CudaDebugAdapterTracker.SESSION_LABEL, typedResponse?.body?.systemInfo);
                     break;
                 }
 
